@@ -1,0 +1,194 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Get a free hosted Postgres database in seconds: `npx create-db`
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Project {
+  id          String   @id @default(uuid())
+  name        String
+  description String?
+  status      String   @default("Active") // Active, Archived, SoftDeleted
+  ownerId     String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  documents   Document[]
+  epics       Epic[]
+  members     ProjectMember[]
+  agentRuns   AgentRun[]
+  auditLogs   AuditLog[]
+}
+
+model ProjectMember {
+  id        String   @id @default(uuid())
+  projectId String
+  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  userId    String
+  role      String   // BA, PO, Developer, QA, Admin
+  createdAt DateTime @default(now())
+}
+
+model Document {
+  id         String   @id @default(uuid())
+  projectId  String
+  project    Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  filename   String
+  fileUrl    String?
+  status     String   @default("Uploaded") // Uploaded, Parsing, Parsed, ParsingFailed
+  uploadedBy String
+  parsedText String?  // Extracted plain text content
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  epics      Epic[]
+}
+
+model Epic {
+  id               String   @id @default(uuid())
+  projectId        String
+  project          Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  title            String
+  description      String?
+  sourceDocumentId String?
+  sourceDocument   Document? @relation(fields: [sourceDocumentId], references: [id], onDelete: SetNull)
+  status           String   @default("Active")
+  createdBy        String
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  features         Feature[]
+}
+
+model Feature {
+  id          String      @id @default(uuid())
+  epicId      String
+  epic        Epic        @relation(fields: [epicId], references: [id], onDelete: Cascade)
+  title       String
+  description String?
+  status      String      @default("Active")
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+  userStories UserStory[]
+}
+
+model UserStory {
+  id                    String   @id @default(uuid())
+  featureId             String
+  feature               Feature  @relation(fields: [featureId], references: [id], onDelete: Cascade)
+  role                  String   // e.g., "As a ..."
+  capability            String   // e.g., "I want to ..."
+  benefit               String   // e.g., "So that ..."
+  status                String   @default("AI_Draft") // AI_Draft, Manual_Draft, Edited_Pending_Validation, Validated, Validated_Warnings, Validation_Failed, Changes_Requested, Approved
+  sourceSpanRef         String?  // JSON with document references
+  generatedByAgentRunId String?
+  currentVersion        Int      @default(1)
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  acceptanceCriteria AcceptanceCriterion[]
+  versions           StoryVersion[]
+  validationResults  ValidationResult[]
+  testCases          TestCase[]
+  automationScripts  AutomationScript[]
+}
+
+model AcceptanceCriterion {
+  id           String    @id @default(uuid())
+  userStoryId  String
+  userStory    UserStory @relation(fields: [userStoryId], references: [id], onDelete: Cascade)
+  scenarioName String
+  gherkinText  String    // Complete Gherkin block
+  orderIndex   Int       @default(0)
+}
+
+model StoryVersion {
+  id              String    @id @default(uuid())
+  userStoryId     String
+  userStory       UserStory @relation(fields: [userStoryId], references: [id], onDelete: Cascade)
+  versionNo       Int
+  contentSnapshot String    // JSON of fields
+  editedBy        String
+  editType        String    // AI, Human
+  createdAt       DateTime  @default(now())
+}
+
+model ValidationResult {
+  id          String    @id @default(uuid())
+  userStoryId String
+  userStory   UserStory @relation(fields: [userStoryId], references: [id], onDelete: Cascade)
+  verdict     String    // PASS, PASS_WITH_WARNINGS, FAIL
+  issuesJson  String    // JSON array of issues
+  agentRunId  String?
+  createdAt   DateTime  @default(now())
+}
+
+model TestCase {
+  id                     String    @id @default(uuid())
+  userStoryId            String
+  userStory              UserStory @relation(fields: [userStoryId], references: [id], onDelete: Cascade)
+  title                  String
+  preconditions          String?
+  stepsJson              String    // JSON of step objects
+  expectedResult         String?
+  priority               String    @default("Medium") // High, Medium, Low
+  status                 String    @default("AI_Draft") // AI_Draft, Edited, Approved
+  mappedScenarioNamesJson String?   // JSON list of scenario names
+  generatedByAgentRunId  String?
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
+}
+
+model AutomationScript {
+  id                       String    @id @default(uuid())
+  userStoryId              String
+  userStory                UserStory @relation(fields: [userStoryId], references: [id], onDelete: Cascade)
+  framework                String    // Playwright
+  language                 String    // TypeScript
+  fileName                 String
+  sourceCode               String
+  mappedTestCaseTitlesJson String?   // JSON list of test cases covered
+  status                   String    @default("AI_Draft_Unexecuted") // AI_Draft_Unexecuted, Edited, Approved
+  version                  Int       @default(1)
+  generatedByAgentRunId    String?
+  createdAt                DateTime  @default(now())
+  updatedAt                DateTime  @updatedAt
+}
+
+model AgentRun {
+  id                    String    @id @default(uuid())
+  projectId             String
+  project               Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  agentType             String    // BSA, Validation, QA
+  inputJson             String    // JSON payload
+  outputJson            String?   // JSON result
+  modelName             String
+  modelVersion          String
+  promptTemplateVersion String
+  status                String    // Queued, Running, Succeeded, Failed
+  startedAt             DateTime  @default(now())
+  completedAt           DateTime?
+  tokenUsage            Int       @default(0)
+  errorMessage          String?
+}
+
+model AuditLog {
+  id                 String   @id @default(uuid())
+  projectId          String
+  project            Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  actorType          String   // User, Agent
+  actorId            String
+  action             String
+  entityType         String
+  entityId           String
+  beforeSnapshotJson String?
+  afterSnapshotJson  String?
+  createdAt          DateTime @default(now())
+}
+
